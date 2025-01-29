@@ -14,6 +14,8 @@ import provider
 import importlib
 import shutil
 import argparse
+import wandb
+import socket
 
 from pathlib import Path
 from tqdm import tqdm
@@ -114,6 +116,21 @@ def main(args):
     log_string('PARAMETER ...')
     log_string(args)
 
+    """WANDB INIT"""
+    wandb_run_name = "{}_modelnet{}_b{}_e{}_lr{}_dr{}".format(args.model,args.num_category,
+                                                              args.batch_size,args.epoch,
+                                                              args.learning_rate,args.decay_rate)
+
+    if args.use_normals:
+        wandb_run_name += "_use_normals"
+    if args.use_uniform_sample:
+        wandb_run_name += "_uniform_sample"
+
+    wandb_run_name += "_{}".format(timestr)
+    wandb.init(project="aa",name=wandb_run_name,config=args,notes=socket.gethostname(),job_type="training")
+
+
+
     '''DATA LOADING'''
     log_string('Load dataset ...')
     data_path = 'data/modelnet40_normal_resampled/'
@@ -169,6 +186,7 @@ def main(args):
     for epoch in range(start_epoch, args.epoch):
         log_string('Epoch %d (%d/%s):' % (global_epoch + 1, epoch + 1, args.epoch))
         mean_correct = []
+        mean_loss = []
         classifier = classifier.train()
 
         scheduler.step()
@@ -187,6 +205,7 @@ def main(args):
 
             pred, trans_feat = classifier(points)
             loss = criterion(pred, target.long(), trans_feat)
+            mean_loss.append(loss.clone().detach().cpu())
             pred_choice = pred.data.max(1)[1]
 
             correct = pred_choice.eq(target.long().data).cpu().sum()
@@ -196,7 +215,11 @@ def main(args):
             global_step += 1
 
         train_instance_acc = np.mean(mean_correct)
+        train_instacne_loss = np.mean(mean_loss)
         log_string('Train Instance Accuracy: %f' % train_instance_acc)
+        
+        wandb.log({"train_instacne_loss":train_instacne_loss},step=epoch)
+        wandb.log({"train_instance_acc":train_instance_acc},step=epoch)
 
         with torch.no_grad():
             instance_acc, class_acc = test(classifier.eval(), testDataLoader, num_class=num_class)
@@ -225,6 +248,8 @@ def main(args):
             global_epoch += 1
 
     logger.info('End of training...')
+
+    wandb.finish()
 
 
 if __name__ == '__main__':
