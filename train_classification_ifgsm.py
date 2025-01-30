@@ -40,6 +40,7 @@ def parse_args():
     parser.add_argument('--model', default='pointnet_cls', help='model name [default: pointnet_cls]')
     parser.add_argument('--num_category', default=40, type=int, choices=[10, 40],  help='training on ModelNet10/40')
     parser.add_argument('--epoch', default=200, type=int, help='number of epoch in training')
+    parser.add_argument('--no_save_result',action='store_true', default=False, help='dont save results')
     parser.add_argument('--save_fmt', default='obj', type=str, help='perturb data save format')
     ''' ATTACKER SETTINGS '''
     parser.add_argument('--attacker', default='basic_ifgsm', help='attacker name [default: basic_ifgsm]')
@@ -98,7 +99,11 @@ def train_attack(save_fn,attack,loader,label_dict,num_class=40):
     # TODO: train or eval
     #  pdb.set_trace()
     attack.predict.eval()
-    save_idx = 1
+    global_idx = 1
+
+    attack_dist = []
+    attack_success = 0
+    
 
     pred_matrix = np.zeros((num_class,num_class))
     pred_num = np.zeros(num_class)
@@ -110,43 +115,60 @@ def train_attack(save_fn,attack,loader,label_dict,num_class=40):
         points = points.transpose(2, 1)
     
         # TODO: draw loss and heatmap of difference
-        perturb_points,pred = attack(points,target,num_class=num_class)
+        perturb_points,pred,dist = attack(points,target,num_class=num_class)
         perturb_target = pred.data.max(1)[1]
 
-        bsz = points.size()[0]
+        attack_dist.append(torch.mean(dist).cpu().item())
+        attack_success += torch.sum(torch.ne(perturb_target,target)).cpu().item()
+
 
         perturb_points = perturb_points.transpose(2,1).cpu()
         perturb_target = perturb_target.cpu()
         target = target.cpu()
 
-        pred = pred.detach().cpu().numpy()
+        dist =  dist.cpu()
+
+        pred = pred.detach().cpu()
+
+
+        pred = pred.numpy()
 
         if args.save_fmt == 'obj':
             save_func = save_tensor2obj
         else:
             save_func = save_tensor2txt
 
+        bsz = points.size()[0]
         for i in range(bsz):
             org = target[i].item()
             pred_matrix[org] += pred[i]
             pred_num[org] += 1
-            save_func(save_fn,
+            if not args.no_save_result:
+                save_func(save_fn,
                         perturb_points[i],
                         label_dict[perturb_target[i].item()],
                             label_dict[target[i].item()],
-                        save_idx)
-            save_idx += 1
+                        global_idx)
+            global_idx += 1
 
 
     # draw heatmap
     mean_matrix = np.zeros_like(pred_matrix)
-    for i in range(num_class):
-        mean_matrix[i] = pred_matrix[i] / pred_num[i]
+    mean_matrix = pred_matrix / pred_num[:,np.newaxis]
+    #  for i in range(num_class):
+        #  mean_matrix[i] = pred_matrix[i] / pred_num[i]
 
-    plt.figure(figsize=(20,20))
+    if args.num_category == 40:
+        plt.figure(figsize=(24,18))
+
     hm = sns.heatmap(mean_matrix, cmap='YlGnBu', annot=True)
     hm.set_xticklabels(list(label_dict.values()),rotation=-45,fontsize=8)
     hm.set_yticklabels(list(label_dict.values()),rotation=-45,fontsize=8)
+
+    mean_attack_dist = sum(attack_dist)/ len(attack_dist)
+    mean_attack_success = attack_success / global_idx
+    wandb.log({"mean_attack_success":mean_attack_success})
+    wandb.log({"mean_attack_dist":mean_attack_dist})
     wandb.log({"diff_matrix":wandb.Image(hm)})
     
 

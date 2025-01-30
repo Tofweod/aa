@@ -33,11 +33,12 @@ def perturb_iterative(x,y,predict,loss_fn,num_class,nb_iter,alpha,eps,
     # x:BxDxN
     out_val = x
     pred = torch.zeros(y.size()[0],num_class,dtype=torch.float32)
+    dist = torch.zeros_like(y)
     #  out_pred = y
 
     for _ in range(nb_iter):
         # TODO: all batch data eps break condition 
-        diff = torch.norm((out_val-x),p=float("inf"),dim=(1,2))
+        dist = torch.norm((out_val-x),p=float(2),dim=(1,2))
         #  if torch.all(torch.norm((out_val-x),p=float("inf"),dim=(1,2)) > eps):
             #  break
 
@@ -62,7 +63,7 @@ def perturb_iterative(x,y,predict,loss_fn,num_class,nb_iter,alpha,eps,
 
 
 
-    return out_val,pred 
+    return out_val,pred,dist 
 
 
         
